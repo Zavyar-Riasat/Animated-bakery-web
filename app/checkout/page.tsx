@@ -1,7 +1,10 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import Link from "next/link";
+import { Elements } from "@stripe/react-stripe-js";
+import { getStripe } from "@/lib/stripe";
+import { StripeCheckoutForm } from "@/components/StripeCheckoutForm";
 import { useCartStore } from "@/lib/cartStore";
 import { formatUSD } from "@/lib/currency";
 import {
@@ -12,8 +15,8 @@ import {
   Lock,
   ArrowLeft,
   ShoppingBag,
-  Building,
-  Calendar,
+  Sparkles,
+  Loader2,
 } from "lucide-react";
 
 const US_STATES = [
@@ -74,91 +77,87 @@ export default function CheckoutPage() {
     useCartStore();
 
   const [form, setForm] = useState({
-    firstName: "",
-    lastName: "",
-    email: "",
-    phone: "",
-    address: "",
-    apartment: "",
-    city: "",
+    firstName: "Eleanor",
+    lastName: "Vance",
+    email: "eleanor@example.com",
+    phone: "(555) 234-5678",
+    address: "742 Fifth Avenue",
+    apartment: "Suite 4B",
+    city: "New York",
     state: "NY",
-    zipCode: "",
-    nameOnCard: "",
-    cardNumber: "",
-    cardExp: "",
-    cardCvc: "",
+    zipCode: "10019",
   });
+
+  const [clientSecret, setClientSecret] = useState<string | null>(null);
+  const [isInitializingStripe, setIsInitializingStripe] = useState(false);
+  const [isMockMode, setIsMockMode] = useState(false);
 
   const [orderConfirmed, setOrderConfirmed] = useState<{
     orderId: string;
+    stripePaymentId: string;
     total: number;
     shippingAddress: string;
   } | null>(null);
-
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-
-  const handleCardNumberChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    let val = e.target.value.replace(/\D/g, "");
-    val = val.substring(0, 16);
-    val = val.replace(/(.{4})/g, "$1 ").trim();
-    setForm((prev) => ({ ...prev, cardNumber: val }));
-  };
-
-  const handleExpChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    let val = e.target.value.replace(/\D/g, "");
-    if (val.length >= 3) {
-      val = val.substring(0, 2) + "/" + val.substring(2, 4);
-    }
-    setForm((prev) => ({ ...prev, cardExp: val.substring(0, 5) }));
-  };
-
-  const detectCardBrand = (number: string) => {
-    const clean = number.replace(/\s/g, "");
-    if (clean.startsWith("4")) return "VISA";
-    if (clean.startsWith("5") || clean.startsWith("2")) return "MASTERCARD";
-    if (clean.startsWith("3")) return "AMEX";
-    if (clean.startsWith("6")) return "DISCOVER";
-    return "CARD";
-  };
-
-  const handlePlaceOrder = (e: React.FormEvent) => {
-    e.preventDefault();
-    setErrorMessage(null);
-
-    // Basic Validation
-    if (!form.firstName || !form.lastName || !form.email || !form.address || !form.zipCode) {
-      setErrorMessage("Please complete all required US shipping address fields.");
-      return;
-    }
-
-    if (!form.cardNumber || !form.cardExp || !form.cardCvc) {
-      setErrorMessage("Please enter valid payment details.");
-      return;
-    }
-
-    setIsProcessing(true);
-
-    setTimeout(() => {
-      const mockOrderId = "MDP-US-" + Math.floor(100000 + Math.random() * 900000);
-      const totalAmount = getTotal();
-      const addr = `${form.address}, ${form.city}, ${form.state} ${form.zipCode}`;
-
-      setOrderConfirmed({
-        orderId: mockOrderId,
-        total: totalAmount,
-        shippingAddress: addr,
-      });
-
-      clearCart();
-      setIsProcessing(false);
-    }, 1500);
-  };
 
   const subtotal = getSubtotal();
   const tax = getEstimatedTax();
   const shipping = getShippingFee();
   const total = getTotal();
+
+  // Initialize Stripe Payment Intent when cart is present
+  useEffect(() => {
+    if (items.length === 0) return;
+
+    let isMounted = true;
+    setIsInitializingStripe(true);
+
+    fetch("/api/create-payment-intent", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        items,
+        subtotal,
+        tax,
+        shippingFee: shipping,
+        shippingDetails: form,
+      }),
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        if (!isMounted) return;
+        if (data.success && data.clientSecret) {
+          setClientSecret(data.clientSecret);
+          setIsMockMode(!!data.isMock);
+        } else {
+          setIsMockMode(true);
+        }
+      })
+      .catch((err) => {
+        console.warn("Failed to initialize Stripe Payment Intent:", err);
+        if (isMounted) setIsMockMode(true);
+      })
+      .finally(() => {
+        if (isMounted) setIsInitializingStripe(false);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [items.length]);
+
+  const handleStripeSuccess = (paymentId: string) => {
+    const mockOrderId = "MDP-STRIPE-" + Math.floor(100000 + Math.random() * 900000);
+    const addr = `${form.address}, ${form.city}, ${form.state} ${form.zipCode}`;
+
+    setOrderConfirmed({
+      orderId: mockOrderId,
+      stripePaymentId: paymentId,
+      total,
+      shippingAddress: addr,
+    });
+
+    clearCart();
+  };
 
   if (orderConfirmed) {
     return (
@@ -169,10 +168,10 @@ export default function CheckoutPage() {
             <CheckCircle2 className="w-12 h-12 text-emerald-400" />
           </div>
           <h1 className="text-3xl font-serif font-bold text-bakery-warmWhite mb-2">
-            Order Confirmed!
+            Stripe Payment Verified!
           </h1>
           <p className="text-bakery-subtext text-sm mb-6">
-            Thank you for choosing Maison du Pain. Your artisan batch is now being prepared.
+            Thank you for choosing Maison du Pain. Your order has been processed securely via Stripe.
           </p>
 
           <div className="bg-bakery-dark/80 border border-bakery-border rounded-2xl p-6 text-left space-y-3 mb-8 text-xs font-mono text-bakery-subtext">
@@ -181,11 +180,15 @@ export default function CheckoutPage() {
               <span className="text-bakery-gold font-bold">{orderConfirmed.orderId}</span>
             </div>
             <div className="flex justify-between border-b border-bakery-border/60 pb-2">
+              <span>Stripe Transaction ID</span>
+              <span className="text-emerald-400 font-bold">{orderConfirmed.stripePaymentId}</span>
+            </div>
+            <div className="flex justify-between border-b border-bakery-border/60 pb-2">
               <span>Total Paid (USD)</span>
               <span className="text-bakery-warmWhite font-bold">{formatUSD(orderConfirmed.total)}</span>
             </div>
             <div>
-              <span className="block mb-1 text-bakery-warmWhite">Destination Address:</span>
+              <span className="block mb-1 text-bakery-warmWhite">US Courier Delivery Destination:</span>
               <span className="text-bakery-subtext">{orderConfirmed.shippingAddress}</span>
             </div>
           </div>
@@ -223,10 +226,12 @@ export default function CheckoutPage() {
     );
   }
 
+  const stripePromise = getStripe();
+
   return (
     <main className="min-h-screen bg-bakery-dark py-12 px-4 sm:px-6 lg:px-8">
       <div className="max-w-7xl mx-auto space-y-8">
-        {/* Header */}
+        {/* Header Navigation */}
         <div className="flex items-center justify-between border-b border-bakery-border pb-6">
           <Link
             href="/menu"
@@ -235,244 +240,191 @@ export default function CheckoutPage() {
             <ArrowLeft className="w-4 h-4" /> Back to Artisan Menu
           </Link>
           <div className="flex items-center gap-2 text-xs text-emerald-400 font-mono">
-            <Lock className="w-3.5 h-3.5" /> 256-Bit SSL Encrypted US Checkout
+            <Lock className="w-3.5 h-3.5" /> 256-Bit Encrypted Stripe Payment Gateway
           </div>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-12">
-          {/* Left Form Column */}
+          {/* Left Shipping & Payment Column */}
           <div className="lg:col-span-7 space-y-8">
-            <form onSubmit={handlePlaceOrder} className="space-y-8">
-              {errorMessage && (
-                <div className="p-4 rounded-xl bg-red-950/40 border border-red-800/50 text-red-400 text-sm">
-                  {errorMessage}
+            {/* 1. US Shipping Address Form */}
+            <div className="bg-bakery-card border border-bakery-border rounded-3xl p-6 sm:p-8 space-y-6">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-full bg-bakery-gold/10 border border-bakery-gold/30 text-bakery-gold font-bold text-xs flex items-center justify-center">
+                  1
                 </div>
-              )}
+                <h2 className="text-xl font-serif font-bold text-bakery-warmWhite flex items-center gap-2">
+                  <Truck className="w-5 h-5 text-bakery-gold" /> US Shipping Address
+                </h2>
+              </div>
 
-              {/* 1. US Shipping Address */}
-              <div className="bg-bakery-card border border-bakery-border rounded-3xl p-6 sm:p-8 space-y-6">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-bakery-warmWhite uppercase tracking-wider mb-2">
+                    First Name *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={form.firstName}
+                    onChange={(e) => setForm({ ...form, firstName: e.target.value })}
+                    className="w-full px-4 py-3 rounded-xl bg-bakery-dark/70 border border-bakery-border focus:border-bakery-gold text-bakery-warmWhite text-sm outline-none transition-colors"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-bakery-warmWhite uppercase tracking-wider mb-2">
+                    Last Name *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={form.lastName}
+                    onChange={(e) => setForm({ ...form, lastName: e.target.value })}
+                    className="w-full px-4 py-3 rounded-xl bg-bakery-dark/70 border border-bakery-border focus:border-bakery-gold text-bakery-warmWhite text-sm outline-none transition-colors"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-bakery-warmWhite uppercase tracking-wider mb-2">
+                    Email Address *
+                  </label>
+                  <input
+                    type="email"
+                    required
+                    value={form.email}
+                    onChange={(e) => setForm({ ...form, email: e.target.value })}
+                    className="w-full px-4 py-3 rounded-xl bg-bakery-dark/70 border border-bakery-border focus:border-bakery-gold text-bakery-warmWhite text-sm outline-none transition-colors"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-bakery-warmWhite uppercase tracking-wider mb-2">
+                    US Phone Number *
+                  </label>
+                  <input
+                    type="tel"
+                    required
+                    value={form.phone}
+                    onChange={(e) => setForm({ ...form, phone: e.target.value })}
+                    className="w-full px-4 py-3 rounded-xl bg-bakery-dark/70 border border-bakery-border focus:border-bakery-gold text-bakery-warmWhite text-sm outline-none transition-colors"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-bakery-warmWhite uppercase tracking-wider mb-2">
+                  Street Address *
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={form.address}
+                  onChange={(e) => setForm({ ...form, address: e.target.value })}
+                  className="w-full px-4 py-3 rounded-xl bg-bakery-dark/70 border border-bakery-border focus:border-bakery-gold text-bakery-warmWhite text-sm outline-none transition-colors"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-bakery-warmWhite uppercase tracking-wider mb-2">
+                    City *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={form.city}
+                    onChange={(e) => setForm({ ...form, city: e.target.value })}
+                    className="w-full px-4 py-3 rounded-xl bg-bakery-dark/70 border border-bakery-border focus:border-bakery-gold text-bakery-warmWhite text-sm outline-none transition-colors"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-bakery-warmWhite uppercase tracking-wider mb-2">
+                    State (US) *
+                  </label>
+                  <select
+                    value={form.state}
+                    onChange={(e) => setForm({ ...form, state: e.target.value })}
+                    className="w-full px-4 py-3 rounded-xl bg-bakery-dark/70 border border-bakery-border focus:border-bakery-gold text-bakery-warmWhite text-sm outline-none transition-colors"
+                  >
+                    {US_STATES.map((s) => (
+                      <option key={s.code} value={s.code} className="bg-bakery-card text-bakery-warmWhite">
+                        {s.name} ({s.code})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-bakery-warmWhite uppercase tracking-wider mb-2">
+                    ZIP Code *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    maxLength={10}
+                    value={form.zipCode}
+                    onChange={(e) => setForm({ ...form, zipCode: e.target.value })}
+                    className="w-full px-4 py-3 rounded-xl bg-bakery-dark/70 border border-bakery-border focus:border-bakery-gold text-bakery-warmWhite text-sm outline-none transition-colors font-mono"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* 2. Stripe Integrated Payment Section */}
+            <div className="bg-bakery-card border border-bakery-border rounded-3xl p-6 sm:p-8 space-y-6">
+              <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <div className="w-8 h-8 rounded-full bg-bakery-gold/10 border border-bakery-gold/30 text-bakery-gold font-bold text-xs flex items-center justify-center">
-                    1
+                    2
                   </div>
                   <h2 className="text-xl font-serif font-bold text-bakery-warmWhite flex items-center gap-2">
-                    <Truck className="w-5 h-5 text-bakery-gold" /> US Shipping Address
+                    <CreditCard className="w-5 h-5 text-bakery-gold" /> Stripe Payment Details
                   </h2>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-semibold text-bakery-warmWhite uppercase tracking-wider mb-2">
-                      First Name *
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      placeholder="Jane"
-                      value={form.firstName}
-                      onChange={(e) => setForm({ ...form, firstName: e.target.value })}
-                      className="w-full px-4 py-3 rounded-xl bg-bakery-dark/70 border border-bakery-border focus:border-bakery-gold text-bakery-warmWhite text-sm outline-none transition-colors"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-bakery-warmWhite uppercase tracking-wider mb-2">
-                      Last Name *
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      placeholder="Doe"
-                      value={form.lastName}
-                      onChange={(e) => setForm({ ...form, lastName: e.target.value })}
-                      className="w-full px-4 py-3 rounded-xl bg-bakery-dark/70 border border-bakery-border focus:border-bakery-gold text-bakery-warmWhite text-sm outline-none transition-colors"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-semibold text-bakery-warmWhite uppercase tracking-wider mb-2">
-                      Email Address *
-                    </label>
-                    <input
-                      type="email"
-                      required
-                      placeholder="jane.doe@example.com"
-                      value={form.email}
-                      onChange={(e) => setForm({ ...form, email: e.target.value })}
-                      className="w-full px-4 py-3 rounded-xl bg-bakery-dark/70 border border-bakery-border focus:border-bakery-gold text-bakery-warmWhite text-sm outline-none transition-colors"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-bakery-warmWhite uppercase tracking-wider mb-2">
-                      US Phone Number *
-                    </label>
-                    <input
-                      type="tel"
-                      required
-                      placeholder="(555) 234-5678"
-                      value={form.phone}
-                      onChange={(e) => setForm({ ...form, phone: e.target.value })}
-                      className="w-full px-4 py-3 rounded-xl bg-bakery-dark/70 border border-bakery-border focus:border-bakery-gold text-bakery-warmWhite text-sm outline-none transition-colors"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-bakery-warmWhite uppercase tracking-wider mb-2">
-                    Street Address *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="123 Fifth Avenue"
-                    value={form.address}
-                    onChange={(e) => setForm({ ...form, address: e.target.value })}
-                    className="w-full px-4 py-3 rounded-xl bg-bakery-dark/70 border border-bakery-border focus:border-bakery-gold text-bakery-warmWhite text-sm outline-none transition-colors"
-                  />
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                  <div>
-                    <label className="block text-xs font-semibold text-bakery-warmWhite uppercase tracking-wider mb-2">
-                      City *
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      placeholder="New York"
-                      value={form.city}
-                      onChange={(e) => setForm({ ...form, city: e.target.value })}
-                      className="w-full px-4 py-3 rounded-xl bg-bakery-dark/70 border border-bakery-border focus:border-bakery-gold text-bakery-warmWhite text-sm outline-none transition-colors"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-semibold text-bakery-warmWhite uppercase tracking-wider mb-2">
-                      State (US) *
-                    </label>
-                    <select
-                      value={form.state}
-                      onChange={(e) => setForm({ ...form, state: e.target.value })}
-                      className="w-full px-4 py-3 rounded-xl bg-bakery-dark/70 border border-bakery-border focus:border-bakery-gold text-bakery-warmWhite text-sm outline-none transition-colors"
-                    >
-                      {US_STATES.map((s) => (
-                        <option key={s.code} value={s.code} className="bg-bakery-card text-bakery-warmWhite">
-                          {s.name} ({s.code})
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-semibold text-bakery-warmWhite uppercase tracking-wider mb-2">
-                      ZIP Code *
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      maxLength={10}
-                      placeholder="10001"
-                      value={form.zipCode}
-                      onChange={(e) => setForm({ ...form, zipCode: e.target.value })}
-                      className="w-full px-4 py-3 rounded-xl bg-bakery-dark/70 border border-bakery-border focus:border-bakery-gold text-bakery-warmWhite text-sm outline-none transition-colors font-mono"
-                    />
-                  </div>
+                <div className="flex items-center gap-1.5 px-3 py-1 bg-bakery-dark/80 rounded-full border border-bakery-gold/30 text-[11px] text-bakery-gold font-mono">
+                  <Sparkles className="w-3 h-3 text-bakery-amber" /> Powered by Stripe
                 </div>
               </div>
 
-              {/* 2. Mock Payment Details */}
-              <div className="bg-bakery-card border border-bakery-border rounded-3xl p-6 sm:p-8 space-y-6">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-full bg-bakery-gold/10 border border-bakery-gold/30 text-bakery-gold font-bold text-xs flex items-center justify-center">
-                      2
-                    </div>
-                    <h2 className="text-xl font-serif font-bold text-bakery-warmWhite flex items-center gap-2">
-                      <CreditCard className="w-5 h-5 text-bakery-gold" /> Payment Information
-                    </h2>
-                  </div>
-
-                  <span className="px-3 py-1 bg-bakery-dark rounded-md border border-bakery-border text-[10px] font-mono font-bold text-bakery-gold">
-                    {detectCardBrand(form.cardNumber)}
-                  </span>
+              {isInitializingStripe ? (
+                <div className="flex flex-col items-center justify-center py-12 text-bakery-subtext">
+                  <Loader2 className="w-8 h-8 text-bakery-gold animate-spin mb-3" />
+                  <p className="text-xs font-mono">Connecting to Stripe Secure Gateway...</p>
                 </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-bakery-warmWhite uppercase tracking-wider mb-2">
-                    Cardholder Name *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="JANE DOE"
-                    value={form.nameOnCard}
-                    onChange={(e) => setForm({ ...form, nameOnCard: e.target.value.toUpperCase() })}
-                    className="w-full px-4 py-3 rounded-xl bg-bakery-dark/70 border border-bakery-border focus:border-bakery-gold text-bakery-warmWhite text-sm outline-none transition-colors"
+              ) : clientSecret && !isMockMode ? (
+                <Elements
+                  stripe={stripePromise}
+                  options={{
+                    clientSecret,
+                    appearance: {
+                      theme: "night",
+                      variables: {
+                        colorPrimary: "#D4AF37",
+                        colorBackground: "#0F0B08",
+                        colorText: "#FDFBF7",
+                        colorDanger: "#ef4444",
+                        fontFamily: "Inter, sans-serif",
+                        borderRadius: "12px",
+                      },
+                    },
+                  }}
+                >
+                  <StripeCheckoutForm
+                    totalAmount={total}
+                    onSuccess={handleStripeSuccess}
                   />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-bakery-warmWhite uppercase tracking-wider mb-2">
-                    Credit Card Number *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="4532 8912 3456 7890"
-                    value={form.cardNumber}
-                    onChange={handleCardNumberChange}
-                    className="w-full px-4 py-3 rounded-xl bg-bakery-dark/70 border border-bakery-border focus:border-bakery-gold text-bakery-warmWhite text-sm outline-none transition-colors font-mono tracking-widest"
-                  />
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-semibold text-bakery-warmWhite uppercase tracking-wider mb-2">
-                      Expiration (MM/YY) *
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      placeholder="12/28"
-                      value={form.cardExp}
-                      onChange={handleExpChange}
-                      className="w-full px-4 py-3 rounded-xl bg-bakery-dark/70 border border-bakery-border focus:border-bakery-gold text-bakery-warmWhite text-sm outline-none transition-colors font-mono text-center"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-semibold text-bakery-warmWhite uppercase tracking-wider mb-2">
-                      CVC / CVV *
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      maxLength={4}
-                      placeholder="892"
-                      value={form.cardCvc}
-                      onChange={(e) => setForm({ ...form, cardCvc: e.target.value.replace(/\D/g, "") })}
-                      className="w-full px-4 py-3 rounded-xl bg-bakery-dark/70 border border-bakery-border focus:border-bakery-gold text-bakery-warmWhite text-sm outline-none transition-colors font-mono text-center"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Submit CTA */}
-              <button
-                type="submit"
-                disabled={isProcessing}
-                className="w-full py-4 px-8 rounded-2xl bg-gradient-to-r from-bakery-amber to-bakery-gold text-bakery-dark font-extrabold text-base uppercase tracking-wider hover:brightness-110 transition-all shadow-xl shadow-bakery-gold/20 flex items-center justify-center gap-2 disabled:opacity-50"
-              >
-                {isProcessing ? (
-                  "Processing US Payment..."
-                ) : (
-                  <>
-                    <Lock className="w-5 h-5" /> Authorize Order ({formatUSD(total)})
-                  </>
-                )}
-              </button>
-            </form>
+                </Elements>
+              ) : (
+                <StripeCheckoutForm
+                  totalAmount={total}
+                  onSuccess={handleStripeSuccess}
+                  isMockMode={true}
+                />
+              )}
+            </div>
           </div>
 
           {/* Right Summary Column */}
