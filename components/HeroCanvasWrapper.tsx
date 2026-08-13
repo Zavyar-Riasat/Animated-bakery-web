@@ -37,7 +37,7 @@ export const HeroCanvasWrapper: React.FC = () => {
   };
 
   return (
-    <div ref={scrollTrackRef} className="relative w-full h-[350vh] bg-bakery-dark">
+    <div ref={scrollTrackRef} className="relative w-full h-[180vh] md:h-[220vh] bg-bakery-dark">
       {/* Sticky Viewport Container */}
       <div className="sticky top-0 w-full h-screen h-[100dvh] overflow-hidden bg-bakery-dark">
         {/* Ambient Radial Background Glows */}

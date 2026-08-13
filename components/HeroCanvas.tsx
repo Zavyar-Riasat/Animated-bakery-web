@@ -17,17 +17,14 @@ export const HeroCanvas: React.FC<HeroCanvasProps> = ({
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const imagesRef = useRef<HTMLImageElement[]>([]);
+  const targetFrameRef = useRef<number>(1);
   const currentFrameRef = useRef<number>(1);
   const animationFrameIdRef = useRef<number | null>(null);
 
   const [imagesLoaded, setImagesLoaded] = useState<number>(0);
   const [isPreloading, setIsPreloading] = useState<boolean>(true);
 
-  // Formats 1 -> "/extracted_frames_2/frame_0001.webp"
-  const getFrameUrl = (index: number): string => {
-    const paddedIndex = String(index).padStart(4, "0");
-    return `${framesDir}/frame_${paddedIndex}.webp`;
-  };
+
 
   /**
    * Draws a specific frame on the canvas with object-fit: cover scaling
@@ -79,6 +76,39 @@ export const HeroCanvas: React.FC<HeroCanvasProps> = ({
     ctx.drawImage(img, offsetX, offsetY, drawWidth, drawHeight);
     ctx.restore();
   }, []);
+
+  /**
+   * Continuous 60fps smooth lerp animation loop
+   */
+  useEffect(() => {
+    let isActive = true;
+
+    const animLoop = () => {
+      if (!isActive) return;
+
+      const diff = targetFrameRef.current - currentFrameRef.current;
+
+      if (Math.abs(diff) > 0.005) {
+        currentFrameRef.current += diff * 0.22; // Responsive 60fps lerp
+        const frameToRender = Math.min(
+          TOTAL_FRAMES,
+          Math.max(1, Math.round(currentFrameRef.current))
+        );
+        renderFrame(frameToRender);
+      }
+
+      animationFrameIdRef.current = requestAnimationFrame(animLoop);
+    };
+
+    animationFrameIdRef.current = requestAnimationFrame(animLoop);
+
+    return () => {
+      isActive = false;
+      if (animationFrameIdRef.current) {
+        cancelAnimationFrame(animationFrameIdRef.current);
+      }
+    };
+  }, [renderFrame]);
 
   /**
    * Preloads all WebP images with responsive mobile/desktop directory selection & fallback
@@ -156,7 +186,7 @@ export const HeroCanvas: React.FC<HeroCanvasProps> = ({
   }, [renderFrame, framesDir, mobileFramesDir]);
 
   /**
-   * Scroll listener using requestAnimationFrame for smooth 60fps scrubbing
+   * Passive scroll listener for target frame calculation
    */
   useEffect(() => {
     const handleScroll = () => {
@@ -175,26 +205,14 @@ export const HeroCanvas: React.FC<HeroCanvasProps> = ({
       const progress = Math.max(0, Math.min(1, scrolled / totalScrollable));
 
       // Map progress [0..1] to frame index [1..192]
-      const frameIndex = Math.min(
+      targetFrameRef.current = Math.min(
         TOTAL_FRAMES,
-        Math.max(1, Math.floor(progress * (TOTAL_FRAMES - 1)) + 1)
+        Math.max(1, progress * (TOTAL_FRAMES - 1) + 1)
       );
-
-      if (frameIndex !== currentFrameRef.current) {
-        currentFrameRef.current = frameIndex;
-
-        if (animationFrameIdRef.current) {
-          cancelAnimationFrame(animationFrameIdRef.current);
-        }
-
-        animationFrameIdRef.current = requestAnimationFrame(() => {
-          renderFrame(frameIndex);
-        });
-      }
     };
 
     const handleResize = () => {
-      renderFrame(currentFrameRef.current);
+      renderFrame(Math.round(currentFrameRef.current));
     };
 
     window.addEventListener("scroll", handleScroll, { passive: true });
@@ -203,13 +221,9 @@ export const HeroCanvas: React.FC<HeroCanvasProps> = ({
     // Initial render call
     handleScroll();
 
-    // Memory leak protection: cleanup event listeners & active animation frames on unmount
     return () => {
       window.removeEventListener("scroll", handleScroll);
       window.removeEventListener("resize", handleResize);
-      if (animationFrameIdRef.current) {
-        cancelAnimationFrame(animationFrameIdRef.current);
-      }
     };
   }, [scrollTrackRef, renderFrame]);
 

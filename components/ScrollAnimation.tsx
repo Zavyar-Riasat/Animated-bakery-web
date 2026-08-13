@@ -134,7 +134,7 @@ export default function ScrollAnimation() {
   }, []);
 
   return (
-    <div ref={trackRef} className="relative w-full h-[350vh]">
+    <div ref={trackRef} className="relative w-full h-[180vh] md:h-[220vh]">
       <div className="sticky top-0 w-full h-screen overflow-hidden">
         <canvas ref={canvasRef} className="w-full h-full object-cover" />
       </div>
