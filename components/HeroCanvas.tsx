@@ -7,11 +7,13 @@ const TOTAL_FRAMES = 192;
 interface HeroCanvasProps {
   scrollTrackRef: React.RefObject<HTMLDivElement>;
   framesDir?: string;
+  mobileFramesDir?: string;
 }
 
 export const HeroCanvas: React.FC<HeroCanvasProps> = ({
   scrollTrackRef,
   framesDir = "/extracted_frames_2",
+  mobileFramesDir = "/mobile",
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const imagesRef = useRef<HTMLImageElement[]>([]);
@@ -52,9 +54,7 @@ export const HeroCanvas: React.FC<HeroCanvasProps> = ({
     ctx.save();
     ctx.scale(dpr, dpr);
 
-    // Smart Mobile-Responsive Scaling
-    // On mobile / portrait viewports, ensure full frame width (cake) is 100% visible without cropping
-    const imgRatio = img.naturalWidth / img.naturalHeight;
+    const imgRatio = (img.naturalWidth || img.width) / (img.naturalHeight || img.height);
     const canvasRatio = width / height;
 
     let drawWidth = width;
@@ -62,31 +62,17 @@ export const HeroCanvas: React.FC<HeroCanvasProps> = ({
     let offsetX = 0;
     let offsetY = 0;
 
-    // Mobile / Portrait detection (screen width < 768 or portrait ratio)
-    const isMobile = width < 768 || canvasRatio < 1.1;
-
-    if (isMobile) {
-      // Contain / Fit-width scaling: fit full image width into canvas width
+    // Full Bleed Cover Scaling (fills 100% of viewport height & width with zero top/bottom dark bars)
+    if (canvasRatio > imgRatio) {
       drawWidth = width;
       drawHeight = width / imgRatio;
-
-      // If drawHeight exceeds container height, scale down to fit height
-      if (drawHeight > height) {
-        drawHeight = height;
-        drawWidth = height * imgRatio;
-      }
-
-      offsetX = (width - drawWidth) / 2;
+      offsetX = 0;
       offsetY = (height - drawHeight) / 2;
     } else {
-      // Desktop aspect cover scaling
-      if (canvasRatio > imgRatio) {
-        drawHeight = width / imgRatio;
-        offsetY = (height - drawHeight) / 2;
-      } else {
-        drawWidth = height * imgRatio;
-        offsetX = (width - drawWidth) / 2;
-      }
+      drawHeight = height;
+      drawWidth = height * imgRatio;
+      offsetX = (width - drawWidth) / 2;
+      offsetY = 0;
     }
 
     ctx.clearRect(0, 0, width, height);
@@ -95,16 +81,28 @@ export const HeroCanvas: React.FC<HeroCanvasProps> = ({
   }, []);
 
   /**
-   * Preloads all 192 WebP images in parallel into memory
+   * Preloads all WebP images with responsive mobile/desktop directory selection & fallback
    */
   useEffect(() => {
     let isMounted = true;
     const loadedImages: HTMLImageElement[] = [];
     let loadedCount = 0;
 
+    const isMobile = typeof window !== "undefined" && window.innerWidth < 768;
+    const primaryDir = isMobile ? mobileFramesDir : framesDir;
+    const fallbackDir = framesDir;
+
+    const getFrameUrl = (dir: string, index: number, ext = "jpg"): string => {
+      const paddedIndex = String(index).padStart(4, "0");
+      if (dir.includes("mobile")) {
+        return `${dir}/frame_${paddedIndex}.${ext}`;
+      }
+      return `${dir}/frame_${paddedIndex}.webp`;
+    };
+
     for (let i = 1; i <= TOTAL_FRAMES; i++) {
       const img = new Image();
-      img.src = getFrameUrl(i);
+      img.src = getFrameUrl(primaryDir, i, "jpg");
 
       img.onload = () => {
         if (!isMounted) return;
@@ -116,7 +114,6 @@ export const HeroCanvas: React.FC<HeroCanvasProps> = ({
           renderFrame(1);
         }
 
-        // Dismiss preloader overlay as soon as initial 5 frames are ready for instant display
         if (loadedCount >= 5 || loadedCount === TOTAL_FRAMES) {
           setIsPreloading(false);
         }
@@ -124,11 +121,28 @@ export const HeroCanvas: React.FC<HeroCanvasProps> = ({
 
       img.onerror = () => {
         if (!isMounted) return;
-        loadedCount += 1;
-        setImagesLoaded(loadedCount);
-        if (loadedCount >= 5 || loadedCount === TOTAL_FRAMES) {
-          setIsPreloading(false);
-        }
+        // Try webp format if jpg fails for mobile
+        img.src = getFrameUrl(primaryDir, i, "webp");
+        img.onerror = () => {
+          if (!isMounted) return;
+          // Fallback to desktop frames directory if mobile frame fails or is missing
+          if (primaryDir !== fallbackDir) {
+            img.src = getFrameUrl(fallbackDir, i, "webp");
+            img.onerror = () => {
+              loadedCount += 1;
+              setImagesLoaded(loadedCount);
+              if (loadedCount >= 5 || loadedCount === TOTAL_FRAMES) {
+                setIsPreloading(false);
+              }
+            };
+          } else {
+            loadedCount += 1;
+            setImagesLoaded(loadedCount);
+            if (loadedCount >= 5 || loadedCount === TOTAL_FRAMES) {
+              setIsPreloading(false);
+            }
+          }
+        };
       };
 
       loadedImages.push(img);
@@ -139,7 +153,7 @@ export const HeroCanvas: React.FC<HeroCanvasProps> = ({
     return () => {
       isMounted = false;
     };
-  }, [renderFrame]);
+  }, [renderFrame, framesDir, mobileFramesDir]);
 
   /**
    * Scroll listener using requestAnimationFrame for smooth 60fps scrubbing
@@ -229,8 +243,8 @@ export const HeroCanvas: React.FC<HeroCanvasProps> = ({
       />
 
       {/* Top and Bottom soft vignette gradients for seamless mobile background integration */}
-      <div className="absolute top-0 left-0 right-0 h-24 bg-gradient-to-b from-bakery-dark via-bakery-dark/30 to-transparent pointer-events-none z-10" />
-      <div className="absolute bottom-0 left-0 right-0 h-24 bg-gradient-to-t from-bakery-dark via-bakery-dark/30 to-transparent pointer-events-none z-10" />
+      <div className="absolute top-0 left-0 right-0 h-24 bg-gradient-to-b from-bakery-dark/30 via-transparent to-transparent pointer-events-none z-10" />
+      <div className="absolute bottom-0 left-0 right-0 h-24 bg-gradient-to-t from-bakery-dark/60 via-bakery-dark/20 to-transparent pointer-events-none z-10" />
     </div>
   );
 };

@@ -39,14 +39,14 @@ export const HeroCanvasWrapper: React.FC = () => {
   return (
     <div ref={scrollTrackRef} className="relative w-full h-[350vh] bg-bakery-dark">
       {/* Sticky Viewport Container */}
-      <div className="sticky top-0 w-full h-screen overflow-hidden bg-bakery-dark">
+      <div className="sticky top-0 w-full h-screen h-[100dvh] overflow-hidden bg-bakery-dark">
         {/* Ambient Radial Background Glows */}
         <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[120%] h-64 bg-radial-gold opacity-20 pointer-events-none blur-3xl" />
         <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-[120%] h-64 bg-radial-amber opacity-15 pointer-events-none blur-3xl" />
 
         {/* Canvas Animation Component */}
         <div className="absolute inset-0 z-0 flex items-center justify-center">
-          <HeroCanvas scrollTrackRef={scrollTrackRef} framesDir="/extracted_frames_2" />
+          <HeroCanvas scrollTrackRef={scrollTrackRef} framesDir="/extracted_frames_2" mobileFramesDir="/mobile" />
         </div>
 
         {/* Desktop & Mobile Responsive Overlay Content with Fade Effect */}
